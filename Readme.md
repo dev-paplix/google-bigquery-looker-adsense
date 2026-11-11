@@ -159,22 +159,34 @@ Add this sheet to Looker Studio via the **Google Sheets** connector.
 
 ## 6. Step 5: Core Yield Metric Formulas
 
-Use these standard formulas for calculated fields in Looker Studio charts (all underscores are escaped to ensure error-free rendering in GitHub Markdown):
+Copy and paste these exact formulas into Looker Studio when creating calculated fields:
 
-* **Total Combined Earnings:**
-  $$\text{SUM}(\text{bq\_earnings}) + \text{SUM}(\text{AdSense\_Earnings})$$
+- **Total Combined Earnings:**
+  ```sql
+  SUM(bq_earnings) + SUM(AdSense_Earnings)
+  ```
 
-* **Total Blended Impressions:**
-  $$\text{SUM}(\text{impressions}) + \text{SUM}(\text{AdSense\_Impressions})$$
+- **Total Blended Impressions:**
+  ```sql
+  SUM(impressions) + SUM(AdSense_Impressions)
+  ```
 
-* **Blended eCPM:**
-  $$\left(\frac{\text{SUM}(\text{bq\_earnings}) + \text{SUM}(\text{AdSense\_Earnings})}{\text{SUM}(\text{impressions}) + \text{SUM}(\text{AdSense\_Impressions})}\right) \times 1000$$
+- **Blended eCPM:**
+  ```sql
+  ((SUM(bq_earnings) + SUM(AdSense_Earnings)) / (SUM(impressions) + SUM(AdSense_Impressions))) * 1000
+  ```
 
-* **Blended Page RPM:**
-  $$\left(\frac{\text{SUM}(\text{bq\_earnings}) + \text{SUM}(\text{AdSense\_Earnings})}{\text{SUM}(\text{page\_views})}\right) \times 1000$$
+- **Blended Page RPM:**
+  ```sql
+  ((SUM(bq_earnings) + SUM(AdSense_Earnings)) / SUM(page_views)) * 1000
+  ```
 
-* **Fill Rate %:**
-  $$\left(\frac{\text{SUM}(\text{impressions})}{\text{SUM}(\text{ad\_requests})}\right) \times 100$$
+- **Fill Rate %:**
+  ```sql
+  (SUM(impressions) / SUM(ad_requests)) * 100
+  ```
 
-* **Blended CTR %:**
-  $$\left(\frac{\text{SUM}(\text{clicks}) + \text{SUM}(\text{AdSense\_Clicks})}{\text{SUM}(\text{impressions}) + \text{SUM}(\text{AdSense\_Impressions})}\right) \times 100$$
+- **Blended CTR %:**
+  ```sql
+  ((SUM(clicks) + SUM(AdSense_Clicks)) / (SUM(impressions) + SUM(AdSense_Impressions))) * 100
+  ```
