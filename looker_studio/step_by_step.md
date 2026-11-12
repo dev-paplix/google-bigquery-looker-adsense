@@ -1,463 +1,201 @@
-# Step-by-Step Implementation Lab: Google Looker, LookML & Looker Studio
+# Looker Studio (Formerly Google Data Studio) Implementation Lab (Using Only Google Sheets)
 
-A hands-on, click-by-click technical lab manual designed to accompany the **1-Day Google Looker Workshop**. This workbook walks you through loading your retail CSV datasets (`retail_orders_dummy-v3.csv` and `retail_users_dummy-v3.csv`), building a governed semantic layer in **LookML**, exploring data with **Pivot Tables & Table Calculations**, designing an interactive **Looker Dashboard**, and connecting your governed Explore directly to **Looker Studio (formerly Google Data Studio)**.
+A complete, step-by-step hands-on guide for **Looker Studio** (`lookerstudio.google.com`) using **Google Sheets** as your sole data source—no BigQuery, SQL database, GCP billing, or LookML required.
 
 ---
 
-## Lab Architecture & Data Schema Overview
-
-Before starting, review the relational schema of the two CSV datasets you will be modeling and visualizing:
+## Dashboard Wireframe & Visual Architecture
 
 ```
-+---------------------------------------+          +---------------------------------------+
-|       `ecommerce.retail_orders`       |          |       `ecommerce.retail_users`        |
-|           (3,500 Rows)                |          |            (500 Rows)                 |
-+---------------------------------------+          +---------------------------------------+
-| PK: order_id                          |          | PK: user_id                           |
-| FK: user_id  -------------------------+--------> |     signup_date                       |
-|     order_timestamp / order_date      |   N : 1  |     country_code / country_name       |
-|     country_code / country_name       |          |     region / state_province           |
-|     region / state_province           |          |     customer_segment                  |
-|     device_category                   |          |     acquisition_channel               |
-|     category / sub_category           |          |     age_group                         |
-|     product_name / quantity           |          |     newsletter_subscribed             |
-|     unit_price_usd / discount_pct     |          +---------------------------------------+
-|     gross_revenue_usd                 |
-|     net_revenue_usd / cogs_usd        |
-|     shipping_fee_usd                  |
-|     order_status / payment_method     |
-+---------------------------------------+
++---------------------------------------------------------------------------------------------------+
+|  [Header Banner] RETAIL REVENUE & CUSTOMER INTELLIGENCE DASHBOARD   [Date Control] [Region Drop.] |
++---------------------------------------------------------------------------------------------------+
+|  [Scorecard 1]            |  [Scorecard 2]            |  [Scorecard 3]            |  [Scorecard 4]|
+|  Net Revenue (Completed)  |  Total Gross Profit       |  Gross Margin %           |  Total Orders |
++---------------------------+---------------------------+---------------------------+---------------+
+|  [GEO CHART: Revenue by Country]                      |  [STACKED COLUMN CHART: Monthly Revenue]  |
+|  - Geo Dimension: country_name                        |  - Dimension: order_date (Year-Month)     |
+|  - Color Metric: Net Revenue                          |  - Breakdown: device_category             |
+|  - Cross-Filtering: Enabled                           |  - Stacked Bars + Data Labels             |
++-------------------------------------------------------+-------------------------------------------+
+|  [DONUT CHART: Share by Category]  |  [TABLE WITH HEATMAP: Segment & Sub-Category Performance]    |
+|  - Dimension: category             |  - Dimensions: customer_segment, category, sub_category      |
+|  - Inner Hole Radius: 55%          |  - Metrics: Net Revenue, Gross Profit, Units Sold            |
++------------------------------------+--------------------------------------------------------------+
 ```
 
 ---
 
-## Phase 1: Ingesting CSV Data & Connecting to Google Looker
+## Phase 1: Import CSV Datasets into Google Sheets
 
-### Step 1.1: Load CSV Files into Your Cloud Data Warehouse
-*(Note: Google Looker requires a SQL database connection for LookML modeling. If you are using Looker Studio exclusively without a SQL warehouse, skip to **Phase 6** to upload the CSVs directly into Looker Studio).*
-
-1. Open your SQL Data Warehouse console (e.g., Google BigQuery, Snowflake, or PostgreSQL).
-2. Create a schema/dataset named `ecommerce`.
-3. Upload **`retail_orders_dummy-v3.csv`** as a table named `retail_orders`:
-   - Ensure `order_id`, `user_id`, `quantity` are typed as `INTEGER`.
-   - Ensure `unit_price_usd`, `discount_pct`, `gross_revenue_usd`, `net_revenue_usd`, `cogs_usd`, `shipping_fee_usd` are typed as `FLOAT` / `NUMERIC`.
-   - Ensure `order_date` is typed as `DATE` and `order_timestamp` as `TIMESTAMP`.
-4. Upload **`retail_users_dummy-v3.csv`** as a table named `retail_users`:
-   - Ensure `user_id` is typed as `INTEGER`, `signup_date` as `DATE`, and `newsletter_subscribed` as `BOOLEAN`.
-
-### Step 1.2: Configure the Database Connection in Google Looker
-1. Log into your **Google Looker** instance.
-2. Click **Admin** (left sidebar) $\rightarrow$ **Database** $\rightarrow$ **Connections** $\rightarrow$ **Add Connection**.
-3. Enter the connection details:
-   - **Name:** `retail_warehouse_conn`
-   - **Dialect:** Select your SQL warehouse dialect (e.g., *Google BigQuery Standard SQL*).
-   - **Database / Dataset:** `ecommerce`
-   - Upload your service account key or enter database credentials.
-4. Click **Test These Settings** to verify green checkmarks, then click **Connect**.
+1. **Create a New Google Sheet:**
+   * Open [Google Sheets](https://sheets.new).
+   * Click `Untitled spreadsheet` in the top-left corner and rename it to `Looker_Studio_Retail_Data`.
+2. **Import `retail_orders_dummy-v3.csv` into Tab 1:**
+   * Double-click `Sheet1` at the bottom-left and rename it to `Orders`.
+   * In the top menu, click **File** $\rightarrow$ **Import** $\rightarrow$ **Upload**.
+   * Drag or browse to select **`retail_orders_dummy-v3.csv`**.
+   * In the Import file modal:
+     * **Import location:** `Replace current sheet`
+     * **Separator type:** `Detect automatically`
+     * **Convert text to numbers, dates, and formulas:** `Yes`
+   * Click **Import data**.
+3. **Import `retail_users_dummy-v3.csv` into Tab 2:**
+   * Click the **`+` (Add sheet)** button in the bottom-left corner.
+   * Double-click `Sheet2` and rename it to `Users`.
+   * Click **File** $\rightarrow$ **Import** $\rightarrow$ **Upload** $\rightarrow$ select **`retail_users_dummy-v3.csv`**.
+   * Choose **Replace current sheet** and click **Import data**.
 
 ---
 
-## Phase 2: Initializing Your LookML Project & Views (LookML Part 1)
+## Phase 2: Connect Both Google Sheet Tabs to Looker Studio
 
-### Step 2.1: Create a New LookML Project
-1. Look at the bottom-left corner of Looker and toggle **Development Mode** to **ON** (purple banner appears at the top).
-2. In the top-left menu, go to **Develop** $\rightarrow$ **Projects**.
-3. Click **New LookML Project** (top-right).
-4. Configure the project:
-   - **Project Name:** `retail_enterprise_bi`
-   - **Starting Point:** **Generate Model from Database Schema**
-   - **Connection:** `retail_warehouse_conn`
-   - **Build Views From:** **All Tables** (or select `retail_orders` and `retail_users`).
-5. Click **Create Project**. Looker automatically generates a `.model.lkml` file and `.view.lkml` files inside the Looker IDE.
-
-### Step 2.2: Configure the Orders View (`retail_orders.view.lkml`)
-1. In the Looker IDE left file browser, open `views/retail_orders.view.lkml`.
-2. Replace the boilerplate code with the governed dimensions, geographic map layers, tiers, and profit/revenue measures below:
-
-```lkml
-view: retail_orders {
-  sql_table_name: `ecommerce.retail_orders` ;;
-
-  # --- PRIMARY & FOREIGN KEYS ---
-  dimension: order_id {
-    primary_key: yes
-    type: number
-    sql: ${TABLE}.order_id ;;
-  }
-
-  dimension: user_id {
-    hidden: yes
-    type: number
-    sql: ${TABLE}.user_id ;;
-  }
-
-  # --- TIME DIMENSION GROUPS ---
-  dimension_group: order {
-    type: time
-    timeframes: [raw, time, date, week, month, quarter, year, day_of_week]
-    sql: ${TABLE}.order_timestamp ;;
-  }
-
-  # --- GEOGRAPHIC DIMENSIONS (Enables Interactive Maps) ---
-  dimension: country_code {
-    type: string
-    map_layer_name: countries
-    sql: ${TABLE}.country_code ;;
-  }
-
-  dimension: country_name {
-    type: string
-    map_layer_name: countries
-    sql: ${TABLE}.country_name ;;
-  }
-
-  dimension: region {
-    type: string
-    sql: ${TABLE}.region ;;
-  }
-
-  dimension: state_province {
-    type: string
-    sql: ${TABLE}.state_province ;;
-  }
-
-  # --- PRODUCT & CHANNEL DIMENSIONS ---
-  dimension: device_category {
-    type: string
-    sql: ${TABLE}.device_category ;;
-  }
-
-  dimension: category {
-    type: string
-    sql: ${TABLE}.category ;;
-  }
-
-  dimension: sub_category {
-    type: string
-    sql: ${TABLE}.sub_category ;;
-  }
-
-  dimension: product_name {
-    type: string
-    sql: ${TABLE}.product_name ;;
-  }
-
-  dimension: order_status {
-    type: string
-    sql: ${TABLE}.order_status ;;
-  }
-
-  dimension: payment_method {
-    type: string
-    sql: ${TABLE}.payment_method ;;
-  }
-
-  # --- CUSTOM COHORT TIERS ---
-  dimension: order_size_tier {
-    type: tier
-    tiers: [0, 50, 150, 300, 500]
-    style: integer
-    sql: ${TABLE}.net_revenue_usd ;;
-  }
-
-  # --- GOVERNED MEASURES ---
-  measure: total_orders {
-    type: count
-    drill_fields: [order_id, order_date, retail_users.customer_segment, category, product_name, total_net_revenue]
-  }
-
-  measure: total_units_sold {
-    type: sum
-    sql: ${TABLE}.quantity ;;
-    value_format_name: decimal_0
-  }
-
-  measure: total_gross_revenue {
-    type: sum
-    sql: ${TABLE}.gross_revenue_usd ;;
-    value_format_name: usd
-  }
-
-  measure: total_net_revenue {
-    type: sum
-    sql: ${TABLE}.net_revenue_usd ;;
-    value_format_name: usd
-  }
-
-  measure: total_cogs {
-    type: sum
-    sql: ${TABLE}.cogs_usd ;;
-    value_format_name: usd
-  }
-
-  measure: total_gross_profit {
-    type: number
-    sql: ${total_net_revenue} - ${total_cogs} ;;
-    value_format_name: usd
-  }
-
-  measure: gross_margin_pct {
-    type: number
-    sql: SAFE_DIVIDE(${total_gross_profit}, ${total_net_revenue}) ;;
-    value_format_name: percent_2
-  }
-
-  measure: average_order_value {
-    type: average
-    sql: ${TABLE}.net_revenue_usd ;;
-    value_format_name: usd
-  }
-
-  measure: completed_net_revenue {
-    type: sum
-    sql: ${TABLE}.net_revenue_usd ;;
-    filters: [order_status: "Completed"]
-    value_format_name: usd
-  }
-
-  measure: return_rate_pct {
-    type: number
-    sql: SAFE_DIVIDE(COUNTIF(${order_status} = 'Returned'), ${total_orders}) ;;
-    value_format_name: percent_2
-  }
-}
-```
-3. Click **Save Changes** (top-right).
-
-### Step 2.3: Configure the Users View (`retail_users.view.lkml`)
-1. Open `views/retail_users.view.lkml` in the IDE.
-2. Replace its contents with:
-
-```lkml
-view: retail_users {
-  sql_table_name: `ecommerce.retail_users` ;;
-
-  dimension: user_id {
-    primary_key: yes
-    type: number
-    sql: ${TABLE}.user_id ;;
-  }
-
-  dimension_group: signup {
-    type: time
-    timeframes: [raw, date, week, month, quarter, year]
-    convert_tz: no
-    datatype: date
-    sql: ${TABLE}.signup_date ;;
-  }
-
-  dimension: customer_segment {
-    type: string
-    sql: ${TABLE}.customer_segment ;;
-  }
-
-  dimension: acquisition_channel {
-    type: string
-    sql: ${TABLE}.acquisition_channel ;;
-  }
-
-  dimension: age_group {
-    type: string
-    sql: ${TABLE}.age_group ;;
-  }
-
-  dimension: newsletter_subscribed {
-    type: yesno
-    sql: ${TABLE}.newsletter_subscribed ;;
-  }
-
-  measure: total_customers {
-    type: count
-    drill_fields: [user_id, customer_segment, acquisition_channel, country_name, signup_date]
-  }
-}
-```
-3. Click **Save Changes**.
+1. **Create a New Report:**
+   * Go to [Looker Studio](https://lookerstudio.google.com/).
+   * Click **Create** (top-left) $\rightarrow$ **Report**.
+2. **Connect the `Orders` Worksheet:**
+   * In the **Add data to report** panel, select **Google Sheets** under *Google Connectors*.
+   * Click **Authorize** if prompted.
+   * Under **Spreadsheet**, select **`Looker_Studio_Retail_Data`**.
+   * Under **Worksheet**, select **`Orders`**.
+   * Verify **Use first row as headers** and **Include hidden and filtered cells** are checked.
+   * Click **Add** (bottom-right) $\rightarrow$ confirm **Add to Report**.
+3. **Connect the `Users` Worksheet:**
+   * In the top toolbar, click **Add data**.
+   * Select **Google Sheets** $\rightarrow$ **`Looker_Studio_Retail_Data`** $\rightarrow$ Worksheet: **`Users`**.
+   * Click **Add** $\rightarrow$ **Add to Report**.
+4. **Verify Field Data Types (Critical for Maps & Currency):**
+   * In the top menu, click **Resource** $\rightarrow$ **Manage added data sources**.
+   * Click **Edit** next to `Orders`:
+     * Find `country_name` $\rightarrow$ click the **Type** dropdown (`Text`) $\rightarrow$ change to **Geo** $\rightarrow$ **Country**.
+     * Find `region` $\rightarrow$ ensure type is **Text** (or **Geo** $\rightarrow$ **Sub-continent**).
+     * Find `net_revenue_usd`, `gross_revenue_usd`, `cogs_usd` $\rightarrow$ change Type to **Numeric** $\rightarrow$ **Currency** $\rightarrow$ **USD ($)**.
+     * Find `order_date` $\rightarrow$ ensure Type is **Date (YYYYMMDD)**.
+   * Click **Done** (top-right) $\rightarrow$ click **Close**.
 
 ---
 
-## Phase 3: Derived Tables, Liquid Parameters & Model Joins (LookML Part 2)
+## Phase 3: Blend the `Orders` and `Users` Sheets Visually
 
-### Step 3.1: Create a Parameterized Derived Table (`customer_ltv_facts.view.lkml`)
-1. In the Looker IDE file browser, click the **`+`** icon at the top $\rightarrow$ **Create View**.
-2. Name the file `customer_ltv_facts.view.lkml` and click **Create**.
-3. Paste the following SQL Derived Table using a **LookML Parameter** and **Liquid Templating** (`{% parameter ... %}`):
-
-```lkml
-view: customer_ltv_facts {
-  parameter: min_order_threshold {
-    type: number
-    default_value: "3"
-    description: "Dynamic filter parameter: Minimum number of completed orders per customer."
-  }
-
-  derived_table: {
-    sql:
-      SELECT
-        user_id,
-        COUNT(DISTINCT order_id) AS lifetime_completed_orders,
-        SUM(net_revenue_usd) AS lifetime_net_revenue,
-        SUM(net_revenue_usd - cogs_usd) AS lifetime_gross_profit,
-        MIN(order_date) AS first_purchase_date,
-        MAX(order_date) AS latest_purchase_date
-      FROM `ecommerce.retail_orders`
-      WHERE order_status = 'Completed'
-      GROUP BY 1
-      HAVING COUNT(DISTINCT order_id) >= {% parameter min_order_threshold %}
-    ;;
-  }
-
-  dimension: user_id {
-    primary_key: yes
-    hidden: yes
-    type: number
-    sql: ${TABLE}.user_id ;;
-  }
-
-  dimension: lifetime_completed_orders {
-    type: number
-    sql: ${TABLE}.lifetime_completed_orders ;;
-  }
-
-  dimension: lifetime_net_revenue {
-    type: number
-    sql: ${TABLE}.lifetime_net_revenue ;;
-    value_format_name: usd
-  }
-
-  dimension: buyer_frequency_tier {
-    type: string
-    sql: CASE
-           WHEN ${lifetime_completed_orders} >= 10 THEN 'Champions (10+ Orders)'
-           WHEN ${lifetime_completed_orders} >= 5 THEN 'Loyalists (5-9 Orders)'
-           ELSE 'Repeat Buyers (3-4 Orders)'
-         END ;;
-  }
-
-  measure: average_customer_ltv {
-    type: average
-    sql: ${TABLE}.lifetime_net_revenue ;;
-    value_format_name: usd
-  }
-}
-```
-4. Click **Save Changes**.
-
-### Step 3.2: Join All Views in the Model File (`retail_enterprise_bi.model.lkml`)
-1. Open `models/retail_enterprise_bi.model.lkml`.
-2. Define the Explore and its `many_to_one` joins:
-
-```lkml
-connection: "retail_warehouse_conn"
-
-include: "/views/*.view.lkml"
-
-explore: retail_orders {
-  label: "Enterprise Retail Orders & Customer LTV"
-  description: "3,500 orders joined to 500 user profiles and dynamic LTV cohorts."
-
-  join: retail_users {
-    type: left_outer
-    relationship: many_to_one
-    sql_on: ${retail_orders.user_id} = ${retail_users.user_id} ;;
-  }
-
-  join: customer_ltv_facts {
-    type: left_outer
-    relationship: many_to_one
-    sql_on: ${retail_orders.user_id} = ${customer_ltv_facts.user_id} ;;
-  }
-}
-```
-3. Click **Save Changes**.
-4. Click **Validate LookML** (top-right) $\rightarrow$ ensure zero errors $\rightarrow$ click **Commit Changes & Push** $\rightarrow$ click **Deploy to Production**.
+1. **Open the Blend Editor:**
+   * In the top toolbar, click **Blend** (or go to **Resource** $\rightarrow$ **Manage blends** $\rightarrow$ **Add a blend**).
+2. **Configure Table 1 (`Orders`):**
+   * Click the pencil icon next to the table name and rename it `Orders_Table`.
+   * **Join keys:** Drag `user_id` into the **Join keys** box.
+   * **Dimensions:** Drag these fields into the **Dimensions** box:
+     * `order_date`
+     * `country_name`
+     * `region`
+     * `device_category`
+     * `category`
+     * `sub_category`
+     * `order_status`
+   * **Metrics:** Drag these fields into the **Metrics** box:
+     * `net_revenue_usd` (Aggregation: `Sum`)
+     * `cogs_usd` (Aggregation: `Sum`)
+     * `quantity` (Aggregation: `Sum`)
+     * `order_id` $\rightarrow$ click the pencil icon next to `order_id` $\rightarrow$ change aggregation to **Count Distinct** and rename it `Total Orders`.
+3. **Configure Table 2 (`Users`):**
+   * Click **Join another table** and select **`Users`**.
+   * Rename it `Users_Table`.
+   * **Join keys:** Drag `user_id` into the **Join keys** box.
+   * **Dimensions:** Drag these fields into the **Dimensions** box:
+     * `customer_segment`
+     * `acquisition_channel`
+     * `age_group`
+4. **Configure Join Operator:**
+   * Click the **Configure join** badge between the two tables.
+   * Select **Left Outer** (keeps all orders and enriches them with user segment attributes).
+   * Confirm the join condition is `user_id` = `user_id`.
+   * Click **Save**.
+5. **Save the Blended Data Source:**
+   * At the top-left of the blend screen, set **Data blend name** to `Blended_Retail_Sheets`.
+   * Click **Save** (bottom-right), then close the blend overlay.
 
 ---
 
-## Phase 4: Exploring Data, Pivots & Table Calculations
+## Phase 4: Build an Executive-Grade Looker Studio Dashboard
 
-### Step 4.1: Build a Pivoted Revenue Exploration
-1. In the top navigation bar, click **Explore** $\rightarrow$ **Enterprise Retail Orders & Customer LTV**.
-2. **Apply a Filter:**
-   - Expand **Retail Orders** $\rightarrow$ hover over **Order Status** $\rightarrow$ click the **Filter** icon.
-   - Set **Order Status** `is equal to` `Completed`.
-3. **Select Dimensions & Measures:**
-   - Click **Order Month** (under `Order Date` dimension group).
-   - Hover over **Device Category** $\rightarrow$ click the **Pivot** icon.
-   - Under Measures, click **Completed Net Revenue** and **Gross Margin %**.
-4. Click **Run** (top-right).
-
-### Step 4.2: Add an Ad-Hoc Table Calculation
-1. In the Explore field picker, click **Custom Fields** $\rightarrow$ **Add** $\rightarrow$ **Table Calculation**.
-2. **Name:** `Channel Share %`
-3. **Formula:**
-   ```looker
-   ${retail_orders.completed_net_revenue} / sum(pivot_row(${retail_orders.completed_net_revenue}))
-   ```
-4. **Format:** `Percent (1)` $\rightarrow$ click **Save**.
-5. Expand the **Visualization** bar $\rightarrow$ select **Column** chart $\rightarrow$ click **Edit** $\rightarrow$ set **Series Positioning** to **Stacked**.
-6. Click the **Gear icon** (top-right) $\rightarrow$ **Save** $\rightarrow$ **As a Look** $\rightarrow$ name it `Monthly Net Revenue by Device`.
+### Step 4.1: Canvas Setup, Theme & Header Controls
+1. **Canvas Size & Theme:**
+   * Click **Page** $\rightarrow$ **Current page settings** $\rightarrow$ **Style** $\rightarrow$ set **Width** to `1440 px` and **Height** to `1050 px`.
+   * Click **Theme and layout** in the toolbar and choose **Edge** (clean light theme) or **Constellation** (dark theme).
+2. **Add Title Banner:**
+   * Click the **Text** (`A`) icon in the toolbar $\rightarrow$ draw a box at the top-left $\rightarrow$ type `Retail Revenue & Customer Intelligence` (Font: **Roboto**, Size: `22px`, Bold).
+3. **Add Date Range Control:**
+   * Click **Add a control** $\rightarrow$ **Date range control** $\rightarrow$ place at the top-right (`X: 1180, Y: 15`).
+   * In the right-hand **Setup** panel, set **Default date range** to **Auto date range** (or **Fixed** across your dataset dates).
+4. **Add Region Dropdown Control:**
+   * Click **Add a control** $\rightarrow$ **Drop-down list** $\rightarrow$ place next to the date picker (`X: 960, Y: 15`).
+   * Set **Data source** to `Blended_Retail_Sheets` and **Control field** to `region`.
 
 ---
 
-## Phase 5: Building an Interactive Google Looker Dashboard
-
-### Step 5.1: Create the Dashboard & Add Top KPI Tiles
-1. Go to **Folders** $\rightarrow$ **My Folder** $\rightarrow$ click **New** $\rightarrow$ **Dashboard**.
-2. Name it `Executive Retail Performance & LTV Dashboard` and click **Create Dashboard**.
-3. Click **Edit Dashboard** (top-right).
-4. **Add 4 Single Value KPI Tiles across Row 1:**
-   - Click **Add** $\rightarrow$ **Visualization** $\rightarrow$ select **Enterprise Retail Orders & Customer LTV**.
-   - Select **Completed Net Revenue** $\rightarrow$ choose **Single Value** visualization $\rightarrow$ title it `Completed Net Revenue` $\rightarrow$ click **Save**.
-   - Repeat to create 3 more Single Value tiles:
-     - **Tile 2:** `Total Gross Profit`
-     - **Tile 3:** `Gross Margin %`
-     - **Tile 4:** `Average Customer LTV` (from `Customer Ltv Facts`).
-   - Drag and resize all 4 tiles side-by-side across the top row.
-
-### Step 5.2: Add Geo Map, Donut Chart & Heatmap Table
-1. **Geographic Map (Row 2, Left):**
-   - Click **Add** $\rightarrow$ **Visualization** $\rightarrow$ select **Country Name** and **Completed Net Revenue**.
-   - Choose **Map** visualization $\rightarrow$ under **Points/Regions**, set color gradient from Light Mint to Deep Emerald Green $\rightarrow$ click **Save**.
-2. **Category Donut Chart (Row 2, Right):**
-   - Click **Add** $\rightarrow$ **Visualization** $\rightarrow$ select **Category** and **Completed Net Revenue**.
-   - Choose **Pie** visualization $\rightarrow$ click **Edit** $\rightarrow$ **Plot** $\rightarrow$ set **Inner Radius** to `55%` $\rightarrow$ click **Save**.
-3. **Segment & Sub-Category Heatmap Table (Row 3, Full Width):**
-   - Click **Add** $\rightarrow$ **Visualization** $\rightarrow$ select **Customer Segment**, **Category**, **Sub Category**, **Total Orders**, **Completed Net Revenue**, and **Return Rate %**.
-   - Choose **Table** $\rightarrow$ click **Edit** $\rightarrow$ **Formatting** $\rightarrow$ **Add Rule** $\rightarrow$ apply a green color scale to `Completed Net Revenue` and a red color scale to `Return Rate %` $\rightarrow$ click **Save**.
-
-### Step 5.3: Configure Dashboard Filters & Cross-Filtering
-1. In **Edit Dashboard** mode, click **Filters** (top toolbar) $\rightarrow$ **Add Filter**:
-   - **Title:** `Order Date` | **Field:** `Order Date` | **Control:** `Date Range` | Map to all tiles.
-2. Add a second filter:
-   - **Title:** `Region` | **Field:** `Region` | **Control:** `Dropdown` | Map to all tiles.
-3. Click **Settings** (top toolbar) $\rightarrow$ toggle **Cross-filtering** to **ON**.
-4. Click **Save** (top-right) to exit Edit Mode. Clicking any country on the map or slice in the donut chart now dynamically filters the entire dashboard.
+### Step 4.2: Top KPI Scorecards (4 Cards Across Row 1)
+1. **Scorecard 1 — Completed Net Revenue:**
+   * Click **Add a chart** $\rightarrow$ **Scorecard** $\rightarrow$ place at `X: 30, Y: 80` (`Width: 320, Height: 95`).
+   * **Data source:** `Blended_Retail_Sheets`.
+   * **Metric:** Select `net_revenue_usd` $\rightarrow$ rename label to `Completed Net Revenue`.
+   * **Filter (Optional):** Click **Add a filter** at the bottom of the Setup panel $\rightarrow$ **Create a filter** $\rightarrow$ `Include` `order_status` `Equal to (=)` `Completed` $\rightarrow$ click **Save**.
+   * **Style Tab:** Center-align text, set metric font size to `28px`, add a subtle border and `6px` corner radius.
+2. **Scorecard 2 — Total Gross Profit:**
+   * Duplicate Scorecard 1 (`Ctrl+D` / `Cmd+D`) and place at `X: 380, Y: 80`.
+   * Under **Metric**, click the metric chip $\rightarrow$ **Create field**:
+     * **Name:** `Gross Profit`
+     * **Formula:** `SUM(net_revenue_usd) - SUM(cogs_usd)`
+     * **Data type:** `Currency (USD)` $\rightarrow$ click **Apply**.
+3. **Scorecard 3 — Gross Margin %:**
+   * Duplicate Scorecard 2 and place at `X: 730, Y: 80`.
+   * Under **Metric**, click **Create field**:
+     * **Name:** `Gross Margin %`
+     * **Formula:** `(SUM(net_revenue_usd) - SUM(cogs_usd)) / SUM(net_revenue_usd)`
+     * **Data type:** `Percent` $\rightarrow$ click **Apply**.
+4. **Scorecard 4 — Total Orders:**
+   * Duplicate Scorecard 3 and place at `X: 1080, Y: 80`.
+   * Set **Metric** to `Total Orders` (`COUNT_DISTINCT(order_id)`).
 
 ---
 
-## Phase 6: Connecting to Looker Studio (Formerly Google Data Studio)
+### Step 4.3: Geographic Map & Stacked Column Chart (Row 2)
+1. **Geographic Map (Left Half: `X: 30, Y: 200, Width: 670, Height: 370`):**
+   * Click **Add a chart** $\rightarrow$ **Geo chart**.
+   * **Data source:** `Blended_Retail_Sheets`.
+   * **Geo dimension:** `country_name`.
+   * **Color metric:** `net_revenue_usd`.
+   * **Style Tab:** Set Max Color to Deep Emerald (`#0F5132`), Mid Color to Mint (`#20C997`), Min Color to Light Gray (`#E2E8F0`).
+   * **Setup Tab (Bottom):** Check **Cross-filtering** so clicking a country filters the entire report.
+2. **Stacked Column Chart (Right Half: `X: 730, Y: 200, Width: 670, Height: 370`):**
+   * Click **Add a chart** $\rightarrow$ **Stacked column chart**.
+   * **Data source:** `Blended_Retail_Sheets`.
+   * **Dimension:** `order_date` $\rightarrow$ click the pencil icon next to `order_date` $\rightarrow$ change **Date & Time** granularity to **Year Month**.
+   * **Breakdown dimension:** `device_category`.
+   * **Metric:** `net_revenue_usd`.
+   * **Sort:** By `order_date` **Ascending**.
+   * **Style Tab:** Toggle **Show data labels** ON and customize series colors (`Desktop`: Royal Blue `#2563EB`, `Mobile`: Cyan `#06B6D4`, `Tablet`: Amber `#F59E0B`).
 
-You can connect your governed Looker Explore directly to **Looker Studio** (Option A) or upload the raw CSVs directly into Looker Studio for standalone reporting (Option B).
+---
 
-### Option A: Connect Governed LookML Explore to Looker Studio
-1. Open [Looker Studio](https://lookerstudio.google.com/) and click **Create** $\rightarrow$ **Report**.
-2. In the **Add data to report** panel, search for and select the **Looker** connector.
-3. Enter your **Looker Instance URL** (e.g., `https://yourcompany.cloud.looker.com`) and authorize your account.
-4. Select **Model:** `retail_enterprise_bi` $\rightarrow$ **Explore:** `Enterprise Retail Orders & Customer LTV` $\rightarrow$ click **Add**.
-5. All your LookML dimensions, measures, and joins appear immediately in the right-hand Looker Studio Data panel without needing manual SQL or report-level blends.
+### Step 4.4: Donut Chart & Heatmap Data Table (Row 3)
+1. **Product Category Donut Chart (Left: `X: 30, Y: 600, Width: 430, Height: 400`):**
+   * Click **Add a chart** $\rightarrow$ **Donut chart**.
+   * **Data source:** `Blended_Retail_Sheets`.
+   * **Dimension:** `category`.
+   * **Metric:** `net_revenue_usd`.
+   * **Style Tab:** Set donut hole slider to `55%`, set slice labels to **Percentage**, and check **Cross-filtering** in the Setup tab.
+2. **Segment & Sub-Category Heatmap Table (Right: `X: 480, Y: 600, Width: 920, Height: 400`):**
+   * Click **Add a chart** $\rightarrow$ **Table with heatmap**.
+   * **Data source:** `Blended_Retail_Sheets`.
+   * **Dimensions:** `customer_segment`, `category`, `sub_category`.
+   * **Metrics:**
+     * `net_revenue_usd`
+     * Calculated Metric: `Gross Profit` (`SUM(net_revenue_usd) - SUM(cogs_usd)`)
+     * `quantity`
+   * **Setup Tab:** Check **Show summary row** at the bottom.
+   * **Style Tab:** Set heatmap color gradient on `net_revenue_usd` to Green (`#E8F5E9` $\rightarrow$ `#2E7D32`) and `Gross Profit` to Blue (`#EFF6FF` $\rightarrow$ `#1D4ED8`).
 
-### Option B: Direct CSV Upload & Blending in Looker Studio
-1. In a new Looker Studio report, click **Add data** $\rightarrow$ select **File Upload**.
-2. Upload **`retail_orders_dummy-v3.csv`** and click **Add**.
-3. Go to **Resource** $\rightarrow$ **Manage added data sources** $\rightarrow$ **Add a Data Source** $\rightarrow$ **File Upload** $\rightarrow$ upload **`retail_users_dummy-v3.csv`**.
-4. Go to **Resource** $\rightarrow$ **Manage blends** $\rightarrow$ **Add a blend**:
-   - **Table 1 (`retail_orders`):** Join Key = `user_id` | Dimensions = `order_date`, `country_name`, `region`, `device_category`, `category`, `sub_category`, `order_status` | Metrics = `net_revenue_usd`, `cogs_usd`, `quantity`.
-   - **Table 2 (`retail_users`):** Join Key = `user_id` | Dimensions = `customer_segment`, `acquisition_channel`, `age_group`.
-   - **Join Operator:** `Left Outer` on `user_id = user_id` $\rightarrow$ name blend `Retail_Orders_Users_Blend` $\rightarrow$ click **Save**.
-5. Build your canvas visuals using `Retail_Orders_Users_Blend`:
-   - **Scorecards:** `SUM(net_revenue_usd)`, `SUM(net_revenue_usd) - SUM(cogs_usd)` (Gross Profit), and `COUNT_DISTINCT(order_id)`.
-   - **Geo Chart:** Geo Dimension = `country_name`, Color Metric = `SUM(net_revenue_usd)`.
-   - **Stacked Column Chart:** Dimension = `order_date` (grouped by Year-Month), Breakdown Dimension = `device_category`, Metric = `SUM(net_revenue_usd)`.
-   - **Donut Chart:** Dimension = `category`, Metric = `SUM(net_revenue_usd)`, Hole Size = `55%`.
-   - **Table with Heatmap:** Dimensions = `customer_segment`, `sub_category`; Metrics = `SUM(net_revenue_usd)` and `SUM(quantity)`.
+---
+
+## Phase 5: Sharing & Automated Email Delivery
+
+1. **View Mode Testing:** Click **View** (top-right) to test clicking slices on your Donut Chart, countries on your Geo Map, and filtering by Region.
+2. **Schedule Automated Reports:** Click the dropdown arrow next to **Share** (top-right) $\rightarrow$ **Schedule delivery** to email PDF snapshots of your Google Sheets dashboard to stakeholders automatically.
